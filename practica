@@ -1,1 +1,6 @@
-1. 
+https://habr.com/ru/post/578744/
+docker container ls
+docker run --rm --name "" -e POSTGRES_PASSWORD="" -e POSTGRES_USER="" -e POSTGRES_DB="" -d -p 5531:5531
+Удаленный доступ (debian-windows)
+apt-get install xrdp
+apt-get install xfce4
