@@ -4,3 +4,180 @@ docker run --rm --name "" -e POSTGRES_PASSWORD="" -e POSTGRES_USER="" -e POSTGRE
 Удаленный доступ (debian-windows)
 apt-get install xrdp
 apt-get install xfce4
+---------------------------------------------------------------------------------
+#################### CentOS ввод в домен Active Directory ##################
+
+Установка необходимых пакетов:
+# dnf install -y realmd sssd oddjob oddjob-mkhomedir adcli samba-common samba-common-tools krb5-workstation authselect-compat
+
+Обнаруение домена:
+# realm discover test.local
+
+Присоединение к домену:
+# realm join test.local -U -v Administrator
+
+Проверка:
+# realm list
+-------------------------------------------------------------
+*******************************OWNCLOUD на CENTOS*************************************** (https://www.dmosk.ru/miniinstruktions.php?mini=owncloud-centos7)
+yum install chrony
+systemctl enable chronyd --now
+\cp /usr/share/zoneinfo/Europe/Moscow /etc/localtime
+
+firewall-cmd --permanent --add-service=http
+
+firewall-cmd --permanent --add-service=https
+
+firewall-cmd --reload
+setenforce 0
+
+sed -i "s/SELINUX=enforcing/SELINUX=disabled/" /etc/selinux/config
+
+Настройка сервера баз данных
+В качестве СУБД используем MariaDB.
+
+Устанавливаем:
+
+yum install mariadb-server
+
+Разрешаем автозапуск и стартуем сервис:
+
+systemctl enable mariadb --now
+
+Задаем пароль для суперпользователя mysql:
+
+mysqladmin -u root password
+
+Подключаемся к MariaDB, создаем базу данных и пользователя:
+
+mysql -uroot -p
+
+> CREATE DATABASE owncloud DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+
+> GRANT ALL PRIVILEGES ON owncloud.* TO owncloud@localhost IDENTIFIED BY 'owncloud';
+
+> \q
+
+* данными командами мы создали базу данных owncloud, затем с таким же названием мы создали пользователя и задали ему пароль owncloud.
+yum install epel-release
+
+... и после — REMI:
+
+rpm -Uvh http://rpms.remirepo.net/enterprise/remi-release-7.rpm
+
+Устанавливаем PHP, PHP-FPM и необходимые для работы owncloud модули:
+
+yum --enablerepo=remi-php72 install php php-fpm php-pdo php-zip php-dom php-intl php-gd php-mysqli php-mbstring php-json php-process
+
+б) На CentOS 8:
+
+В репозитории CentOS 8 есть требуемая версия пакета php. Просто вводим команду:
+
+dnf install php php-fpm php-pdo php-zip php-dom php-intl php-gd php-mysqli php-mbstring php-json php-process
+Сам пакет php-fpm мы установили на предыдущем шаге. Поэтому на данном этапе необходимо его настроить.
+
+Открываем конфигурационный файл:
+
+vi /etc/php-fpm.d/www.conf
+
+Находим опции listen и listen.owner. Задаем им значения:
+
+listen = /run/php-fpm/www.sock
+...
+listen.owner = nginx
+
+Разрешаем автозапуск php-fpm и запускаем его:
+
+systemctl enable php-fpm --now
+NGINX
+yum install nginx
+vi /etc/nginx/conf.d/owncloud.dmosk.ru.conf
+
+server {
+        listen 80;
+        server_name owncloud.dmosk.ru;
+        return 301 https://$server_name$request_uri;
+}
+
+server {
+        listen 443 ssl;
+        server_name owncloud.dmosk.ru;
+
+        ssl_certificate /etc/nginx/ssl/cert.pem;
+        ssl_certificate_key /etc/nginx/ssl/cert.key;
+
+        root /var/www/owncloud;
+
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        client_max_body_size 10G;
+        fastcgi_buffers 64 4K;
+
+        rewrite ^/caldav(.*)$ /remote.php/caldav$1 redirect;
+        rewrite ^/carddav(.*)$ /remote.php/carddav$1 redirect;
+        rewrite ^/webdav(.*)$ /remote.php/webdav$1 redirect;
+
+        index index.php;
+        error_page 403 = /core/templates/403.php;
+        error_page 404 = /core/templates/404.php;
+
+        location = /robots.txt {
+            allow all;
+            log_not_found off;
+            access_log off;
+        }
+
+        location ~ ^/(data|config|\.ht|db_structure\.xml|README) {
+                deny all;
+        }
+
+        location / {
+                rewrite ^/.well-known/host-meta /public.php?service=host-meta last;
+                rewrite ^/.well-known/host-meta.json /public.php?service=host-meta-json last;
+                rewrite ^/.well-known/carddav /remote.php/carddav/ redirect;
+                rewrite ^/.well-known/caldav /remote.php/caldav/ redirect;
+                rewrite ^(/core/doc/[^\/]+/)$ $1/index.html;
+                try_files $uri $uri/ index.php;
+        }
+
+        location ~ ^(.+?\.php)(/.*)?$ {
+                try_files $1 = 404;
+                include fastcgi_params;
+                fastcgi_param SCRIPT_FILENAME $document_root$1;
+                fastcgi_param PATH_INFO $2;
+                fastcgi_param HTTPS on;
+                fastcgi_pass unix:/run/php-fpm/www.sock;
+        }
+
+        location ~* ^.+\.(jpg|jpeg|gif|bmp|ico|png|css|js|swf)$ {
+                expires modified +30d;
+                access_log off;
+        }
+}
+
+mkdir /etc/nginx/ssl
+
+cd /etc/nginx/ssl
+Генерируем сертификат:
+
+openssl req -new -x509 -days 1461 -nodes -out cert.pem -keyout cert.key -subj "/C=RU/ST=SPb/L=SPb/O=Global Security/OU=IT Department/CN=owncloud.dmosk.ru/CN=owncloud"
+Проверяем конфигурацию nginx, разрешаем его автозапуск и перезапускаем сервис:
+
+nginx -t
+
+systemctl enable nginx --now
+yum install wget bzip2
+Переходим во временную папку и скачиваем исходник для установки:
+
+cd /tmp
+
+wget https://download.owncloud.org/community/owncloud-10.4.1.tar.bz2
+
+Распаковываем скачанный архив:
+
+tar -xvjf owncloud-*.tar.bz2 -C /var/www/
+
+Задаем права доступа:
+
+chown -R apache:apache /var/www/owncloud
+Открываем браузер и переходим по адресу https://owncloud.dmosk.ru, где owncloud.dmosk.ru — адрес облачного сервиса. 
+(CNAME в DNS для сервера nginx либо hosts)
